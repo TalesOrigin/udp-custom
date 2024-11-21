@@ -544,6 +544,12 @@ make_service() {
   interfas=$(ip -4 addr | grep inet | grep -vE '127(\.[0-9]{1,3}){3}' | grep "$ip_nat" | awk {'print $NF'})
   ip_publica=$(grep -m 1 -oE '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' <<<"$(wget -T 10 -t 1 -4qO- "http://ip1.dynupdate.no-ip.com/" || curl -m 10 -4Ls "http://ip1.dynupdate.no-ip.com/")")
 
+  # Fallback for public IP
+  if [[ -z "$ip_publica" ]]; then
+    echo "Failed to fetch public IP address."
+    exit 1
+  fi
+
   cat <<EOF >/etc/systemd/system/udp-request.service
 [Unit]
 Description=UDP Request Service
@@ -553,7 +559,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/root
-ExecStart=/usr/bin/udp-request -ip=$ip_publica -net=$interfas$Port -mode=system
+ExecStart=/usr/bin/udp-request -ip=$ip_publica -net=$interfas -mode=system
 Restart=always
 RestartSec=3s
 
@@ -561,21 +567,22 @@ RestartSec=3s
 WantedBy=multi-user.target
 EOF
 
+  # Set UDP buffer sizes
+  sudo sysctl -w net.core.rmem_max=134217728
+  sudo sysctl -w net.core.wmem_max=134217728
+  sudo sysctl -w net.core.rmem_default=67108864
+  sudo sysctl -w net.core.wmem_default=67108864
+
+  # Enable and start service
   systemctl enable udp-request &>/dev/null
   systemctl start udp-request &>/dev/null
-  if [[ $(systemctl is-active udp-request) = 'active' ]]; then
-    # msg -verd 'OK'
-    systemctl enable udp-request &>/dev/null
-  else
-    msg -verm2 'fail'
-  fi
-  if [[ $(systemctl is-active udp-request) = 'active' ]]; then
-    # msg -verd 'OK'
-    systemctl enable udp-request &>/dev/null
-  else
-    msg -verm2 'fail'
-  fi
 
+  # Check service status
+  if [[ $(systemctl is-active udp-request) = 'active' ]]; then
+    echo "UDP Request Service started successfully."
+  else
+    echo "Failed to start UDP Request Service."
+  fi
 }
 
 uninstall_udp_manager() {
